@@ -1,0 +1,136 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "nokogiri"
+
+# require "phlex/heroicons"
+
+# puts Phlex::Heroicons::ArchiveBoxArrowDown.new(classes: "text").call
+# exit
+
+def icon_source_folder
+  "../heroicons/src"
+end
+
+def variants
+  ["solid", "outline"]
+end
+
+def transform_svg(indent_level, document)
+  process_node(indent_level, document.root, include_classes: true)
+end
+
+def process_node(indent_level, node, include_classes:)
+  # puts node.attributes.inspect
+  filtered_attributes = node.attributes.reject { |attribute| ["height", "width", "class"].include?(attribute) }
+  filtered_attributes["stroke"] = "currentColor" if filtered_attributes["stroke"] && filtered_attributes["stroke"].to_s.start_with?("#")
+  filtered_attributes["fill"] = "currentColor" if filtered_attributes["fill"] && filtered_attributes["fill"].to_s.start_with?("#")
+
+  filtered_children = node.children.reject { |child| child.node_type == Nokogiri::XML::Node::TEXT_NODE }
+  filtered_namespaces = node.namespaces
+
+  result = String.new
+  result << "#{"  " * indent_level}#{node.name}"
+  if filtered_attributes || node.namespaces || include_classes
+    result << "(" 
+  end
+
+  if include_classes
+    result << "class: classes" 
+  end
+
+  if (filtered_attributes || filtered_namespaces) && include_classes
+    result << ", " 
+  end
+
+  if filtered_namespaces
+    result << filtered_namespaces.map { |name, value| "#{name.gsub('-', '_')}: \"#{value.to_s}\"" }.join(", ") 
+  end
+
+  if filtered_attributes && filtered_namespaces
+    result << ", " 
+  end
+
+  if filtered_attributes
+    result << filtered_attributes.map { |name, value| "#{name.gsub('-', '_')}: \"#{value.to_s}\"" }.join(", ") 
+  end
+
+  if filtered_attributes || node.namespaces
+    result << ")" 
+  end
+
+  if filtered_children.size > 0
+    result << " do\n"
+      indent_level += 1
+      result << node.children.reject { |child| child.node_type == Nokogiri::XML::Node::TEXT_NODE }.map { |child| process_node(indent_level, child, include_classes: false) }.join("\n")
+      indent_level -= 1
+    result << "\n#{"  " * indent_level}end\n"
+  end
+
+  result
+end
+
+def generate_icon_class(basename, solid_doc, outline_doc)
+  indent_level = 0
+  result = String.new
+  result << "# frozen_string_literal: true\n"
+  result << "\n"
+  result << "module Phlex\n"
+    indent_level += 1
+
+    result << "#{"  " * indent_level}module Heroicons\n"
+      indent_level += 1
+
+      result << "#{"  " * indent_level}class #{basename.split('-').map(&:capitalize).join} < BaseIcon\n"
+      indent_level += 1
+
+        result << "#{"  " * indent_level}def solid\n"
+        indent_level += 1
+
+          result << transform_svg(indent_level, solid_doc)
+
+        indent_level -= 1
+        result << "#{"  " * indent_level}end\n"
+
+        result << "\n"
+
+        result << "#{"  " * indent_level}def outline\n"
+        indent_level += 1
+
+          result << transform_svg(indent_level, outline_doc)
+
+        indent_level -= 1
+        result << "#{"  " * indent_level}end\n"
+
+      indent_level -= 1
+      result << "#{"  " * indent_level}end\n"
+
+    indent_level -= 1
+    result << "#{"  " * indent_level}end\n"
+
+  indent_level -= 1
+  result << "#{"  " * indent_level}end\n"
+
+  result
+end
+
+def run
+  directory_path = File.join(__dir__, icon_source_folder, "24", "solid")
+
+  Dir.glob("#{directory_path}/*").each do |file_path|
+    next unless File.file?(file_path)
+    basename = File.basename(file_path, ".svg")
+    solid_doc = Nokogiri::XML(File.open(File.expand_path(File.join(__dir__, icon_source_folder, "24", "solid", "#{basename}.svg"))))
+    outline_doc = Nokogiri::XML(File.open(File.expand_path(File.join(__dir__, icon_source_folder, "24", "outline", "#{basename}.svg"))))
+
+    puts "Processing file: #{file_path}"
+    result = generate_icon_class(basename, solid_doc, outline_doc)
+    puts result
+    result_path = File.expand_path(File.join(__dir__, "../lib/phlex/heroicons", "#{basename.gsub('-', '_')}.rb"))
+
+    File.open(result_path, "w+") { |file| file.puts(result) }
+  end
+end
+
+run
